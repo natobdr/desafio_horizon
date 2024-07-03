@@ -10,6 +10,7 @@ use App\Http\Resources\VooResource;
 use App\Models\Aeroporto;
 use App\Models\Classe;
 use App\Models\Passageiro;
+use App\Models\Ticket;
 use App\Models\Voo;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
@@ -87,8 +88,72 @@ class VooController extends Controller
     }
     public function teste()
     {
-        $dados = Voo::with(['classe.tipoClasse'])->find($id);
-        dd($clientes->resource);
+        $origem = '71';
+        $destino = '70';
+        $dataPartida = "2024-07-30 07:30";
+        $dataRetorno = "2024-08-01 07:30";
+        $precoMin = "0";
+        $precoMax = "0";
+
+
+        $query = Voo::with(['aeroportoOrigem.cidade', 'aeroportoDestino.cidade', 'classes.tipoClasse'])
+            ->where('data_hora_partida', '>=', now());
+
+        $queryIda = clone $query;
+        $queryIda->where('aeroporto_origem_id', $origem)
+            ->where('aeroporto_destino_id', $destino)
+            ->whereDate('data_hora_partida', $dataPartida)
+            ->whereHas('classes', function($q) {
+                $q->where('quantidade_assentos', '>', 0)
+                    ->where('valor_assento', '>', 0); // Verifica se o valor do assento é maior que zero
+            });
+
+// Filtro opcional por preço mínimo
+        if ($precoMin !== null) {
+            $queryIda->whereHas('classes', function($q) use ($precoMin) {
+                $q->where('valor_assento', '>=', $precoMin);
+            });
+        }
+
+// Filtro opcional por preço máximo
+        if ($precoMax !== null) {
+            $queryIda->whereHas('classes', function($q) use ($precoMax) {
+                $q->where('valor_assento', '<=', $precoMax);
+            });
+        }
+
+// Filtro para voos de retorno
+        $queryRetorno = clone $query;
+        if ($dataRetorno) {
+            $queryRetorno->where('aeroporto_origem_id', $destino)
+                ->where('aeroporto_destino_id', $origem)
+                ->whereDate('data_hora_partida', $dataRetorno)
+                ->whereHas('classes', function($q) {
+                    $q->where('quantidade_assentos', '>', 0)
+                        ->where('valor_assento', '>', 0); // Verifica se o valor do assento é maior que zero
+                });
+
+            // Filtro opcional por preço mínimo para voos de retorno
+            if ($precoMin !== null) {
+                $queryRetorno->whereHas('classes', function($q) use ($precoMin) {
+                    $q->where('valor_assento', '>=', $precoMin);
+                });
+            }
+
+            // Filtro opcional por preço máximo para voos de retorno
+            if ($precoMax !== null) {
+                $queryRetorno->whereHas('classes', function($q) use ($precoMax) {
+                    $q->where('valor_assento', '<=', $precoMax);
+                });
+            }
+        } else {
+            $queryRetorno->whereRaw('1 = 0'); // Evita que traga voos de retorno quando não há data de retorno especificada
+        }
+
+// Executando as queries
+        $voosIda = $queryIda->orderBy('data_hora_partida', 'asc')->get();
+        $voosRetorno = $queryRetorno->orderBy('data_hora_partida', 'asc')->get();
+        dd($voosIda. " - " . $voosRetorno);
     }
 
     public function create()

@@ -18,7 +18,7 @@ class AeroportoApiController extends Controller
         $aeroportos = AeroportoResource::collection($aeroportos);
 
         if ($aeroportos) {
-            return ['aeroportos' => $aeroportos->resource];
+            return response()->json(['message' => 'Aeroportos encontrados com sucesso', 'aeroportos' => $aeroportos->resource], 200);
         } else {
             // Lida com a falha da solicitação
             return response()->json(['message' => 'Nenhum aeroporto encontrado'], 404);

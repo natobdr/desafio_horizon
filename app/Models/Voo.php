@@ -16,6 +16,7 @@ class Voo extends Model
         'aeroporto_origem_id',
         'aeroporto_destino_id',
         'data_hora_partida',
+        'voo_status',
     ];
 
     public static function generateUniqueFlightNumber()

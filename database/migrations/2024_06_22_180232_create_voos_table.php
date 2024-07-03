@@ -14,10 +14,12 @@ return new class extends Migration
         Schema::create('voos', function (Blueprint $table) {
             $table->id();
             $table->string('numero')->unique();
+            $table->dateTime('data_hora_partida');
+            $table->boolean('voos_status')->default(true);
+            $table->timestamps();
+
             $table->foreignId('aeroporto_origem_id')->constrained('aeroportos');
             $table->foreignId('aeroporto_destino_id')->constrained('aeroportos');
-            $table->dateTime('data_hora_partida');
-            $table->timestamps();
         });
     }
 

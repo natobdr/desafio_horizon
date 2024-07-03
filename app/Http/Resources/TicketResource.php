@@ -20,6 +20,7 @@ class TicketResource extends JsonResource
             'passageiro_id' => new PassageiroResource($this->whenLoaded('passageiro')),
             'voo_id' => new VooResource($this->whenLoaded('voo')),
             'preco_total' => $this->preco_total,
+            'ticket_status' => $this->ticket_status,
         ];
     }
 }

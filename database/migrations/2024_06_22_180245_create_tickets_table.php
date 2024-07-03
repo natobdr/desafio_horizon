@@ -13,10 +13,12 @@ return new class extends Migration
     {
         Schema::create('tickets', function (Blueprint $table) {
             $table->id();
+            $table->string('numero')->unique();
             $table->unsignedBigInteger('classe_id');
             $table->unsignedBigInteger('passageiro_id');
             $table->unsignedBigInteger('voo_id');
             $table->decimal('preco_total', 8, 2);
+            $table->boolean('voos_status')->default(true);
             $table->timestamps();
 
             $table->foreign('classe_id')->references('id')->on('classes')->onDelete('cascade');

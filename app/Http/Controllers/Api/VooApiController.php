@@ -20,19 +20,96 @@ class VooApiController extends Controller
     public function index()
     {
         $voos = Voo::with(['aeroportoOrigem.cidade', 'aeroportoDestino.cidade', 'classes.tipoClasse'])->get();
-        $aeroportos = Aeroporto::all();
-
         $voos = VooResource::collection($voos);
-        $aeroportos =AeroportoResource::collection($aeroportos);
 
-        if ($voos && $aeroportos) {
-            return ['aeroportos' => $aeroportos->resource,'voos' => $voos->resource];
+        if ($voos) {
+            return response()->json(['message' => 'Voos encontrados', 'voos' => $voos->resource], 200);
         } else {
             // Lida com a falha da solicitação
-            return response()->json(['message' => 'Os dados não foram encontrado'], 404);
+            return response()->json(['message' => 'Nenhum Voo Encontrado'], 404);
         }
 
     }
+
+    public function search(Request $request)
+    {
+        try {
+            $origem = $request->input('voo_origin');
+            $destino = $request->input('voo_destination');
+            $dataPartida = $request->input('data_hora_partida');
+            $dataRetorno = $request->input('data_hora_retorno');
+            $precoMin = $request->input('preco_min');
+            $precoMax = $request->input('preco_max');
+
+            // Validação dos campos de entrada
+            $request->validate([
+                'voo_origin' => 'required|exists:aeroportos,id',
+                'voo_destination' => 'required|exists:aeroportos,id',
+                'data_hora_partida' => 'required|date',
+                'data_hora_retorno' => 'nullable|date',
+                'preco_min' => 'nullable|numeric|min:0',
+                'preco_max' => 'nullable|numeric|min:0',
+            ]);
+
+            $query = Voo::with(['aeroportoOrigem.cidade', 'aeroportoDestino.cidade', 'classes.tipoClasse'])
+                ->where('data_hora_partida', '>=', now())
+                ->where('assentos_disponiveis', '>', 0);
+
+
+            $queryIda = clone $query;
+            $queryIda->where('aeroporto_origem_id', $origem)
+                ->where('aeroporto_destino_id', $destino)
+                ->whereDate('data_hora_partida', $dataPartida);
+
+            if ($precoMin !== null) {
+                $queryIda->whereHas('classes', function($q) use ($precoMin) {
+                    $q->where('preco', '>=', $precoMin);
+                });
+            }
+
+            if ($precoMax !== null) {
+                $queryIda->whereHas('classes', function($q) use ($precoMax) {
+                    $q->where('preco', '<=', $precoMax);
+                });
+            }
+
+            $queryRetorno = clone $query;
+            if ($dataRetorno) {
+                $queryRetorno->where('aeroporto_origem_id', $destino)
+                    ->where('aeroporto_destino_id', $origem)
+                    ->whereDate('data_hora_partida', $dataRetorno);
+
+                if ($precoMin !== null) {
+                    $queryRetorno->whereHas('classes', function($q) use ($precoMin) {
+                        $q->where('preco', '>=', $precoMin);
+                    });
+                }
+                if ($precoMax !== null) {
+                    $queryRetorno->whereHas('classes', function($q) use ($precoMax) {
+                        $q->where('preco', '<=', $precoMax);
+                    });
+                }
+            } else {
+                $queryRetorno->whereRaw('1 = 0');
+            }
+
+            $voosIda = $queryIda->orderBy('data_hora_partida', 'asc')->get();
+
+            $voosRetorno = $queryRetorno->orderBy('data_hora_partida', 'asc')->get();
+
+            if ($voosIda->isEmpty()) {
+                return response()->json(['message' => 'Nenhum voo foi encontrado!'], 404);
+            }
+
+            return response()->json(['message' => 'Voos encontrados com sucesso!', 'voosIda' => $voosIda, 'voosRetorno' => $voosRetorno], 200);
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json(['errors' => $e->errors()], 422);
+        } catch (\Exception $e) {
+            return response()->json(['error' => 'Erro ao buscar voos. Por favor, tente novamente mais tarde.'], 500);
+        }
+    }
+
 
     public function voos($id)
     {
@@ -80,77 +157,108 @@ class VooApiController extends Controller
 
     public function store(Request $request)
     {
-        $request->validate([
-            'aeroporto_origem_id' => 'required',
-            'aeroporto_destino_id' => 'required',
-            'data_hora_partida' => 'required',
-            'classe_id' => 'required|array',
-            'classe_id.*' => 'exists:classes,id'
-        ]);
+        try{
+            $request->validate([
+                'aeroporto_origem_id' => 'required',
+                'aeroporto_destino_id' => 'required',
+                'data_hora_partida' => 'required|date_format:Y-m-d\TH:i',
+                'classe_id' => 'required|array',
+                'classe_id.*' => 'integer'
+            ]);
 
-        $numero = Voo::generateUniqueFlightNumber();
+            if ($request->input('aeroporto_origem_id') == $request->input('aeroporto_destino_id')) {
+                return response()->json([
+                    'errors' => [
+                        'aeroporto_origem_id' => ['Origem e destino não podem ser o mesmo aeroporto'],
+                        'aeroporto_destino_id' => ['Origem e destino não podem ser o mesmo aeroporto'],
+                    ]
+                ], 422);
+            }
 
-        foreach ($request->classe_id as $id){
+            $classeId = $request->input('classe_id');
+            if (count($classeId) !== count(array_unique($classeId))) {
+                return response()->json([
+                    'errors' => [
+                        'classe_id' => ['Os IDs das classes não podem se repetir']
+                    ]
+                ], 422);
+            }
+
+            $numero = Voo::generateUniqueFlightNumber();
+
             $voo = Voo::create([
                 'numero' => $numero,
-                'aeroporto_origem_id' => $request->aeroporto_origem_id,
-                'aeroporto_destino_id' => $request->aeroporto_destino_id,
-                'data_hora_partida' => $request->data_hora_partida,
-                'classe_id' => $id,
+                'aeroporto_origem_id' => $request->input('aeroporto_origem_id'),
+                'aeroporto_destino_id' => $request->input('aeroporto_destino_id'),
+                'data_hora_partida' => $request->input('data_hora_partida'),
+                'voos_status' => true
             ]);
+
+            $voo->classes()->sync($request->input('classe_id'));
+
+            return response()->json(['message' => 'Voo criado com sucesso', 'voo' => $voo], 200);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json(['errors' => $e->errors()], 422);
+        } catch (\Exception $e) {
+            return response()->json(['error' => 'Erro ao atualizar o voo. Por favor, tente novamente mais tarde.'], 500);
         }
-
-
-        $voo->classes()->sync($request->classe_id);
-
-        return redirect()->route('voos.index')->with('success', 'Voo criado com sucesso!');
     }
 
     public function update(Request $request)
     {
         try{
-        $id = $request->input('id');
-        $classe_id = $request->input('classe_id');
+            $voo = Voo::findOrFail($request->id_voo);
+        }catch (\Exception){
+            return response()->json(['message' => 'O voo informado não foi encontrado'], 422);
+        }
 
-        $request->validate([
-            'aeroporto_origem_id' => 'required|exists:aeroportos,id',
-            'aeroporto_destino_id' => 'required|exists:aeroportos,id',
-            'data_hora_partida' => 'required|date_format:Y-m-d\TH:i',
-        ]);
-
-        $voo = Voo::findOrFail($id);
-            $voo->update([
-                'aeroporto_origem_id' => $request->input('aeroporto_origem_id'),
-                'aeroporto_destino_id' => $request->input('aeroporto_destino_id'),
-                'data_hora_partida' => $request->input('data_hora_partida'),
+        try {
+            // Validação do request
+            $request->validate([
+                'id_voo' => 'required',
+                'aeroporto_origem_id' => 'required',
+                'aeroporto_destino_id' => 'required',
+                'data_hora_partida' => 'required|date_format:Y-m-d\TH:i',
+                'classe_id' => 'required|array',
+                'classe_id.*' => 'integer',
             ]);
 
-            $voo->classes()->sync($classe_id);
 
-            if ($voo) {
-                return response()->json([
-                    'message' => 'Voo Atualizado com sucesso!',
-                ], 200);
-            } else {
-                return response()->json([
-                    'message' => 'Voo não atualizado.',
-                ], 404);
-            }
+            $voo->update([
+                'aeroporto_origem_id' => $request->aeroporto_origem_id,
+                'aeroporto_destino_id' => $request->aeroporto_destino_id,
+                'data_hora_partida' => $request->data_hora_partida,
+                'voos_status' => true
+            ]);
 
+            $voo->classes()->sync($request->classe_id);
+
+            return response()->json(['message' => 'Voo atualizado com sucesso'], 200);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json(['errors' => $e->errors()], 422);
         } catch (\Exception $e) {
-            return response()->json([
-                'message' => $e,
-            ], 404);
+            return response()->json(['error' => 'Erro ao atualizar o voo. Por favor, tente novamente mais tarde.'], 500);
         }
     }
 
-    public function destroy($id)
+    public function destroy(Request $request)
     {
+        try{
+            $voo = Voo::findOrFail($request->id_voo);
+        }catch (\Exception){
+            return response()->json(['message' => 'O voo informado não foi encontrado'], 422);
+        }
 
-        $voo = Voo::findOrFail($id);
-        $voo->delete();
+        try {
 
-        return redirect()->route('voos.index')->with('success', 'Voo excluído com sucesso!');
+            $voo->update([
+                'voos_status' => false
+            ]);
+
+            return response()->json(['message' => 'Voo atualizado com sucesso'], 200);
+        } catch (\Exception $e) {
+            return response()->json(['error' => 'Erro ao cancelar o voo. Por favor, tente novamente mais tarde.'], 500);
+        }
     }
 
     public function searchFlights(Request $request)

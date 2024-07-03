@@ -22,8 +22,8 @@
             margin-left: 20px;
         }
         .qr-code img {
-            width: 100px; /* Ajuste o tamanho da imagem conforme necessário */
-            height: 100px; /* Ajuste o tamanho da imagem conforme necessário */
+            width: 100px;
+            height: 100px;
         }
     </style>
 </head>
